@@ -1,0 +1,95 @@
+Shader "Hidden/US_NightVision"
+{
+    Properties
+    {
+        _MainTex ("Texture", 2D) = "white" {}
+    }
+    SubShader
+    {
+        // No culling or depth
+        Cull Off ZWrite Off ZTest Always
+
+        Pass
+        {
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+
+            #include "UnityCG.cginc"
+
+            struct v2f
+            {
+                float2 uv : TEXCOORD0;
+                float4 vertex : SV_POSITION;
+
+                half4 screenPos : TEXCOORD1;
+            };
+
+            v2f vert (appdata_img v)
+            {
+                v2f o;
+                o.vertex = UnityObjectToClipPos(v.vertex);
+                o.uv = v.texcoord;
+                // 通过裁切空间坐标得到屏幕空间坐标
+                o.screenPos = ComputeScreenPos(o.vertex);
+                return o;
+            }
+
+            sampler2D _MainTex;
+            half _Distortion; // 扭曲强度
+            half _Scale; // 扭曲范围
+
+            fixed _Brightness; // 亮度
+            fixed _Saturation; // 饱和度
+            fixed _Contrast; //对比度
+
+            fixed4 _Tint; // 着色颜色
+
+            half _VignetteFalloff; // 暗角衰弱
+            half _VignetteIntensity; // 暗角强度
+
+            sampler2D _Noise; // 噪点纹理
+            half _NoiseAmount; // 噪点数量
+            half _RandomValue; // 随机数值
+
+            fixed4 frag (v2f i) : SV_Target
+            {
+                // 镜头扭曲
+                fixed2 center = i.uv - 0.5; // 先将纹理坐标原点从左下角移动到中心
+                half radius2 = pow(center.x, 2) + pow(center.y, 2);
+                half distortion = 1 + sqrt(radius2) * radius2 * _Distortion;
+
+                half2 uvScreen = center * distortion * _Scale + 0.5;
+                fixed4 screen = tex2D(_MainTex, uvScreen);
+
+                // 亮度、饱和度、对比度、着色
+                screen += _Brightness;
+
+                fixed4 luminance = Luminance(screen.rgb).xxxx;
+                screen = lerp(luminance, screen, _Saturation);
+
+                fixed4 gray = fixed4(0.5,0.5,0.5,1);
+                screen = lerp(gray, screen, _Contrast);
+
+                screen *= _Tint;
+
+                // 暗角效果
+                half circle = distance(i.screenPos.xy, fixed2(0.5,0.5)); // 使用distance()计算屏幕坐标与中心点之间的距离
+                fixed vignette = 1 - saturate(pow(circle, _VignetteFalloff));
+                screen *= pow(vignette, _VignetteIntensity);
+
+                // 噪点
+                float2 uvNoise = i.uv * _NoiseAmount;
+                // 使用sin()产生[-1,1]的随机数
+                uvNoise.x += sin(_RandomValue);
+                uvNoise.y -= sin(_RandomValue + 1);
+
+                fixed noise = tex2D(_Noise, uvNoise).r;
+                screen *= noise;
+
+                return screen;
+            }
+            ENDCG
+        }
+    }
+}
